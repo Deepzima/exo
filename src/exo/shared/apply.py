@@ -191,6 +191,12 @@ def apply_instance_deleted(event: InstanceDeleted, state: State) -> State:
 
 
 def apply_runner_status_updated(event: RunnerStatusUpdated, state: State) -> State:
+    runner_belongs_to_instance = any(
+        event.runner_id in instance.shard_assignments.runner_to_shard
+        for instance in state.instances.values()
+    )
+    if not runner_belongs_to_instance:
+        return state
     new_runners: Mapping[RunnerId, RunnerStatus] = {
         **state.runners,
         event.runner_id: event.runner_status,
@@ -199,9 +205,8 @@ def apply_runner_status_updated(event: RunnerStatusUpdated, state: State) -> Sta
 
 
 def apply_runner_deleted(event: RunnerDeleted, state: State) -> State:
-    assert event.runner_id in state.runners, (
-        "RunnerDeleted before any RunnerStatusUpdated events"
-    )
+    if event.runner_id not in state.runners:
+        return state
     new_runners: Mapping[RunnerId, RunnerStatus] = {
         rid: rs for rid, rs in state.runners.items() if rid != event.runner_id
     }

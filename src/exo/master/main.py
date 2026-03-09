@@ -36,6 +36,7 @@ from exo.shared.types.events import (
     InputChunkReceived,
     InstanceDeleted,
     LocalForwarderEvent,
+    RunnerDeleted,
     NodeGatheredInfo,
     NodeTimedOut,
     TaskCreated,
@@ -369,6 +370,10 @@ class Master:
                         await self.event_sender.send(
                             InstanceDeleted(instance_id=instance_id)
                         )
+                        for runner_id in instance.shard_assignments.runner_to_shard:
+                            await self.event_sender.send(
+                                RunnerDeleted(runner_id=runner_id)
+                            )
                         break
 
             # time out dead nodes

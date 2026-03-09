@@ -26,6 +26,7 @@ from exo.shared.types.events import (
     Event,
     InstanceCreated,
     InstanceDeleted,
+    RunnerDeleted,
     TaskStatusUpdated,
 )
 from exo.shared.types.memory import Memory
@@ -240,11 +241,21 @@ def get_transition_events(
                         )
                     )
 
+            # InstanceDeleted first so interleaved RunnerStatusUpdated is rejected by apply.
             events.append(
                 InstanceDeleted(
                     instance_id=instance_id,
                 )
             )
+
+            for runner_id in current_instances[
+                instance_id
+            ].shard_assignments.runner_to_shard:
+                events.append(
+                    RunnerDeleted(
+                        runner_id=runner_id,
+                    )
+                )
 
     return events
 

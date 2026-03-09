@@ -11,10 +11,16 @@ from exo.master.tests.conftest import (
     create_socket_connection,
 )
 from exo.shared.models.model_cards import ModelCard, ModelId, ModelTask
+from exo.shared.tests.conftest import get_pipeline_shard_metadata
 from exo.shared.topology import Topology
 from exo.shared.types.commands import PlaceInstance
 from exo.shared.types.common import CommandId, NodeId
-from exo.shared.types.events import InstanceCreated, InstanceDeleted, TaskStatusUpdated
+from exo.shared.types.events import (
+    InstanceCreated,
+    InstanceDeleted,
+    RunnerDeleted,
+    TaskStatusUpdated,
+)
 from exo.shared.types.memory import Memory
 from exo.shared.types.multiaddr import Multiaddr
 from exo.shared.types.profiling import NetworkInterfaceInfo, NodeNetworkInfo
@@ -28,7 +34,7 @@ from exo.shared.types.worker.instances import (
     MlxJacclInstance,
     MlxRingInstance,
 )
-from exo.shared.types.worker.runners import ShardAssignments
+from exo.shared.types.worker.runners import RunnerId, ShardAssignments
 from exo.shared.types.worker.shards import Sharding
 
 
@@ -274,6 +280,46 @@ def test_get_transition_events_delete_instance(instance: Instance):
     assert len(events) == 1
     assert isinstance(events[0], InstanceDeleted)
     assert events[0].instance_id == instance_id
+
+
+def test_get_transition_events_delete_instance_emits_runner_deleted():
+    # arrange
+    node_a = NodeId("node-a")
+    node_b = NodeId("node-b")
+    runner_a = RunnerId()
+    runner_b = RunnerId()
+    instance_id = InstanceId()
+    instance = MlxRingInstance(
+        instance_id=instance_id,
+        shard_assignments=ShardAssignments(
+            model_id=ModelId("test-model"),
+            runner_to_shard={
+                runner_a: get_pipeline_shard_metadata(
+                    ModelId("test-model"), device_rank=0, world_size=2
+                ),
+                runner_b: get_pipeline_shard_metadata(
+                    ModelId("test-model"), device_rank=1, world_size=2
+                ),
+            },
+            node_to_runner={node_a: runner_a, node_b: runner_b},
+        ),
+        hosts_by_node={},
+        ephemeral_port=50000,
+    )
+    current_instances: dict[InstanceId, Instance] = {instance_id: instance}
+    target_instances: dict[InstanceId, Instance] = {}
+
+    # act
+    events = get_transition_events(current_instances, target_instances, {})
+
+    # assert — InstanceDeleted first (blocks interleaved RunnerStatusUpdated),
+    # then one RunnerDeleted per runner to clean up state.runners
+    assert isinstance(events[0], InstanceDeleted)
+    assert events[0].instance_id == instance_id
+
+    runner_deleted_events = [e for e in events if isinstance(e, RunnerDeleted)]
+    assert len(runner_deleted_events) == 2
+    assert {e.runner_id for e in runner_deleted_events} == {runner_a, runner_b}
 
 
 def test_placement_selects_leaf_nodes(
